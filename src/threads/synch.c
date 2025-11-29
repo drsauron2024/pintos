@@ -32,6 +32,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+static struct list ready_list;
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -260,9 +261,22 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
-  if(!thread_mlfqs)
-  {
-    remove_donations_by_lock(lock);//Remove all donations related to this lock
+  if (!thread_mlfqs) {  
+    struct thread *holder = thread_current ();
+    struct list_elem *e, *next;
+    for (e = list_begin (&holder->donations); e != list_end (&holder->donations); e = next) {
+      next = list_next (e);  
+      struct donation *d = list_entry (e, struct donation, elem);
+      if (d->lock == lock) {
+        list_remove (e); 
+        free (d);    
+      }
+    }
+    thread_update_priority (holder);
+    if (holder->status == THREAD_READY) {
+      list_remove (&holder->elem);
+      list_insert_ordered (&ready_list, &holder->elem, thread_priority_compare, NULL);
+    }
   }
   lock->holder = NULL;
   sema_up (&lock->semaphore);

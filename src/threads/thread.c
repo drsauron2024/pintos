@@ -148,12 +148,15 @@ remove_donations_by_lock(struct lock *lock){
 void
 thread_update_priority(struct thread *t)
 {
-    t->priority = t->original_priority;
-    if (!list_empty(&t->donations)) {
-        struct donation *d = list_entry(list_front(&t->donations),struct donation, elem);
-        if (d->priority > t->priority)
-            t->priority = d->priority;
+  int max_donation = t->original_priority;
+  struct list_elem *e;
+  for (e = list_begin(&t->donations); e != list_end(&t->donations); e = list_next(e)) {
+    struct donation *d = list_entry(e, struct donation, elem);
+    if (d->priority > max_donation) {
+      max_donation = d->priority;
     }
+  }
+  t->priority = max_donation;
 }
 
 /* Initializes the threading system by transforming the code
