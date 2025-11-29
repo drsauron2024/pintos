@@ -92,7 +92,6 @@ struct thread
     struct list donations;              //Figure out who donated their priority, and store them in a list
                                         //so that we can change the priority as needed
     struct lock *waiting_lock;          //The lock that the thread is waiting on
-    struct list_elem donation_elem;
     struct list_elem allelem;           /* List element for all threads list. */
     int64_t wake_ticks;                 /* Ticks to wake up the thread */
     /* Shared between thread.c and synch.c. */
@@ -106,7 +105,13 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
-
+//the struct used to keep track of priority donations
+struct donation {
+    int priority;
+    struct lock *lock;
+    struct thread *donor;
+    struct list_elem elem;
+};
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
@@ -148,4 +153,5 @@ void remove_donations_by_lock(struct lock *lock);
 bool donation_priority_compare (const struct list_elem *a,const struct list_elem *b,void *aux UNUSED);
 void donate_priority(struct thread *donor);
 bool list_elem_is_in_list (struct list_elem *e);
+void thread_update_priority(struct thread *t);
 #endif /* threads/thread.h */

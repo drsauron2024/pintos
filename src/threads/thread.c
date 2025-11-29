@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include <stdlib.h>
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -89,8 +90,8 @@ thread_priority_compare (const struct list_elem *a,const struct list_elem *b,voi
 bool
 donation_priority_compare (const struct list_elem *a,const struct list_elem *b,void *aux UNUSED)
 {
-  struct thread *t1 = list_entry (a, struct thread, donation_elem);
-  struct thread *t2 = list_entry (b, struct thread, donation_elem);
+  struct donation *t1 = list_entry (a, struct donation, elem);
+  struct donation *t2 = list_entry (b, struct donation, elem);
   return t1->priority > t2->priority;
 }
 //The donation funtion may not just between two threads
@@ -100,27 +101,29 @@ void
 donate_priority(struct thread *donor){
   if(thread_mlfqs) return; //No priority donation in mlfqs mode
   struct thread *cur = donor;
-  struct lock *lock = cur->waiting_lock;
-  while (lock != NULL && lock->holder != NULL) {
-        struct thread *holder = lock->holder;
-        if (holder->priority < cur->priority){
-          holder->priority = cur->priority;
-          if (!list_elem_is_in_list(&donor->donation_elem))
-            list_insert_ordered(&holder->donations, &donor->donation_elem, donation_priority_compare, NULL);
-          if (holder->status == THREAD_READY)
-            {
-              /* remove and re-insert in ordered position */
-              list_remove(&holder->elem);
-              list_insert_ordered(&ready_list, &holder->elem, thread_priority_compare, NULL);
-            }
-        }
-        else
-        {
-          break;
-        }
-        cur = holder;
-        lock = holder->waiting_lock;
+  while (true) {
+    struct lock *lock = cur->waiting_lock;
+    if (lock == NULL || lock->holder == NULL) break;
+    struct thread *holder = lock->holder;
+    bool donated = false;
+    if (holder->priority < cur->priority) {
+      struct donation *d = malloc(sizeof(struct donation));
+      d->priority = cur->priority;
+      d->lock = lock;
+      list_insert_ordered(&holder->donations, &d->elem, donation_priority_compare, NULL);
+      thread_update_priority(holder);
+      if (holder->status == THREAD_RUNNING && thread_current()->priority < holder->priority) {
+          thread_yield();//let the thread who owned a higher priority lock to run 
+      }
+      if (holder->status == THREAD_READY) {
+        list_remove(&holder->elem);
+        list_insert_ordered(&ready_list, &holder->elem, thread_priority_compare, NULL);
+      }
+      donated = true;
     }
+    if (!donated) break;
+    cur = holder;
+  }
 }
 //The donation from donor to receiver should be released when the lock is released
 void
@@ -128,35 +131,31 @@ remove_donations_by_lock(struct lock *lock){
   if(thread_mlfqs) return; //No priority donation in mlfqs mode
   struct thread *current_thread = thread_current();
   struct list_elem *e = list_begin (&current_thread->donations);
-  //We have stored all donators in a list
-  //Therefore, we can simply traverse the list and remove those related to the lock
   while (e != list_end (&current_thread->donations)){
-    struct thread *donor = list_entry (e, struct thread, donation_elem);
+    struct donation *d = list_entry(e, struct donation, elem);
     struct list_elem *next = list_next(e);
-    if (donor->waiting_lock == lock){
-      list_remove(e);
+    if (d->lock == lock) {
+        list_remove(e);
+        free(d);
     }
     e = next;
   }
-  //After removing all donations related to the lock, recover the priority
-  current_thread->priority = current_thread->original_priority;
-  //Check if there are other donations remaining
-  //If so, we need to update the priority accordingly
-  if (!list_empty(&current_thread->donations)) {
-    struct list_elem *max_elem = list_front(&current_thread->donations);
-    struct thread *max_donor = list_entry(max_elem, struct thread, donation_elem);
-    if (max_donor->priority > current_thread->priority)
-        current_thread->priority = max_donor->priority;
-  }
-  if(current_thread->status == THREAD_READY)
-    {
-      //remove and re-insert in ordered position
-      list_remove(&current_thread->elem);
-      list_insert_ordered(&ready_list, &current_thread->elem, thread_priority_compare, NULL);
-    }
+  thread_update_priority(current_thread);
   if (!intr_context())
       thread_yield();
 }
+ 
+void
+thread_update_priority(struct thread *t)
+{
+    t->priority = t->original_priority;
+    if (!list_empty(&t->donations)) {
+        struct donation *d = list_entry(list_front(&t->donations),struct donation, elem);
+        if (d->priority > t->priority)
+            t->priority = d->priority;
+    }
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -429,7 +428,7 @@ thread_set_priority (int new_priority)
   //Check if there are any donations
   if(!list_empty(&current_thread->donations))
   {
-    struct thread *top = list_entry (list_front(&current_thread->donations), struct thread, donation_elem);
+    struct thread *top = list_entry (list_front(&current_thread->donations), struct donation, elem);
     if (top->priority > effective_priority)
         effective_priority = top->priority;
   }

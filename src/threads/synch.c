@@ -226,8 +226,8 @@ lock_acquire (struct lock *lock)
   }
 
   sema_down (&lock->semaphore);//Block the thread until the lock is available
-  lock->holder = current_thread;
   current_thread->waiting_lock = NULL;//Clear the waiting lock when the lock is acquired
+  lock->holder = current_thread;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -264,7 +264,6 @@ lock_release (struct lock *lock)
   {
     remove_donations_by_lock(lock);//Remove all donations related to this lock
   }
-
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
